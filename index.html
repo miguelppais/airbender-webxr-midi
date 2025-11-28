@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Airbender XR</title>
+    <style>
+        body { margin: 0; background-color: #050505; color: #eee; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.92); z-index: 10; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; transition: opacity 0.5s;
+        }
+        .panel {
+            background: #151515; padding: 2rem; border-radius: 16px; border: 1px solid #333;
+            max-width: 600px; width: 90%; box-shadow: 0 0 80px rgba(0,210,255,0.15);
+            max-height: 90vh; overflow-y: auto;
+        }
+        h1 { margin: 0 0 0.5rem 0; color: #fff; font-weight: 200; font-size: 1.8rem; letter-spacing: 2px; }
+        h2 { margin: 0 0 1.5rem 0; font-size: 0.9rem; color: #00d2ff; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .section { margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #333; }
+        .section:last-child { border-bottom: none; }
+        
+        label { display: block; margin-bottom: 0.5rem; font-size: 0.85rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+        select, input[type="number"] {
+            width: 100%; padding: 12px; background: #222; border: 1px solid #444;
+            color: #fff; border-radius: 6px; font-size: 1rem; box-sizing: border-box; transition: 0.2s;
+        }
+        select:focus, input:focus { outline: none; border-color: #00d2ff; background: #2a2a2a; }
+
+        /* Preset Buttons */
+        .preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .preset-btn {
+            background: #222; border: 1px solid #444; color: #aaa; padding: 10px;
+            border-radius: 6px; cursor: pointer; font-size: 0.8rem; transition: 0.2s;
+        }
+        .preset-btn:hover { background: #333; color: #fff; }
+        .preset-btn.active { background: #00d2ff; color: #000; border-color: #00d2ff; font-weight: bold; }
+
+        /* Axis Config */
+        .axis-row { 
+            display: grid; grid-template-columns: 40px 1fr 80px; gap: 10px; 
+            align-items: center; background: #1a1a1a; padding: 8px 12px; 
+            border-radius: 8px; margin-bottom: 8px; border: 1px solid #2a2a2a;
+        }
+        .axis-label { font-weight: bold; color: #00d2ff; font-size: 1.1rem; text-align: center;}
+        
+        /* Start Button */
+        button#start-btn {
+            background: linear-gradient(135deg, #00d2ff 0%, #0078ff 100%);
+            color: #fff; font-weight: bold; border: none;
+            padding: 16px; border-radius: 8px; cursor: pointer; width: 100%;
+            font-size: 1.1rem; letter-spacing: 1px; text-transform: uppercase;
+            box-shadow: 0 4px 20px rgba(0,120,255,0.3); transition: transform 0.1s, box-shadow 0.2s;
+        }
+        button#start-btn:active { transform: scale(0.98); }
+        button#start-btn:disabled { background: #333; color: #555; cursor: not-allowed; box-shadow: none; transform: none; }
+        
+        #status { margin-top: 15px; font-size: 0.8rem; color: #666; text-align: center; }
+        .hidden { opacity: 0; pointer-events: none; }
+        
+        /* LED Indicators */
+        .led {
+            width: 8px; height: 8px; border-radius: 50%; background: #333; 
+            margin-right: 10px; display: inline-block;
+        }
+        .led.on { background: #00ff00; box-shadow: 0 0 10px #00ff00; }
+        .led.rx { background: #00d2ff; box-shadow: 0 0 10px #00d2ff; }
+    </style>
+    <!-- Three.js Import -->
+    <script type="importmap">
+        { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+    </script>
+</head>
+<body>
+
+    <div id="overlay">
+        <div class="panel">
+            <h1>Airbender XR</h1>
+            <h2>Hand Gesture Custom MIDI Control for Meta Quest</h2>
+            
+            <div class="section">
+                <label>1. Connect to Hardware</label>
+                <div style="display:flex; align-items:center; margin-bottom:10px;">
+                    <div id="led-out" class="led"></div>
+                    <select id="midi-out-select"><option value="">Scanning...</option></select>
+                </div>
+                <div style="font-size:0.75rem; color:#666; margin-top:5px; line-height:1.4;">
+                    Select your ROLI Piano here. It will merge these signals and send them to your DAW via its USB connection.
+                </div>
+            </div>
+
+            <div class="section">
+                <label>2. Channel & Visualization</label>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                    <div>
+                        <span style="font-size:0.8rem; color:#888;">Control Channel</span>
+                        <input type="number" id="midi-channel" value="1" min="1" max="16">
+                    </div>
+                    <div>
+                        <span style="font-size:0.8rem; color:#888;">Visualizer Input</span>
+                        <div style="display:flex; align-items:center; height:42px;">
+                            <div id="led-in" class="led"></div>
+                            <select id="midi-in-select" style="padding:8px;"><option value="">None</option></select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <label>3. Axis Mapping Presets</label>
+                <div class="preset-grid">
+                    <button class="preset-btn active" onclick="applyPreset('roli_macro')">ROLI Macros (Safe)</button>
+                    <button class="preset-btn" onclick="applyPreset('standard_cc')">Standard CC (Vol/Mod)</button>
+                </div>
+
+                <!-- Axis X -->
+                <div class="axis-row">
+                    <div class="axis-label">X</div>
+                    <select id="type-x">
+                        <option value="cc" selected>CC</option>
+                        <option value="pb">Pitch Bend</option>
+                        <option value="at">Channel Press</option>
+                    </select>
+                    <input type="number" id="val-x" value="113" placeholder="CC#">
+                </div>
+
+                <!-- Axis Y -->
+                <div class="axis-row">
+                    <div class="axis-label">Y</div>
+                    <select id="type-y">
+                        <option value="cc" selected>CC</option>
+                        <option value="pb">Pitch Bend</option>
+                        <option value="at">Channel Press</option>
+                    </select>
+                    <input type="number" id="val-y" value="114" placeholder="CC#">
+                </div>
+
+                <!-- Axis Z -->
+                <div class="axis-row">
+                    <div class="axis-label">Z</div>
+                    <select id="type-z">
+                        <option value="cc" selected>CC</option>
+                        <option value="pb">Pitch Bend</option>
+                        <option value="at">Channel Press</option>
+                    </select>
+                    <input type="number" id="val-z" value="107" placeholder="CC#">
+                </div>
+            </div>
+
+            <button id="start-btn" disabled>Enter Mixed Reality</button>
+            <div id="status">Waiting for MIDI...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { ARButton } from 'three/addons/webxr/ARButton.js';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+        import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+        // --- Config ---
+        const CONFIG = {
+            smooth: 0.15,
+            boxSize: 0.45, // Slightly larger for expressive movements
+        };
+
+        // --- State ---
+        let scene, camera, renderer;
+        let controlBox, handIndicator, ghostHands = [];
+        let hand1, hand2;
+        let isGrabbing = false;
+        
+        let midi = { access: null, out: null, in: null };
+        let lastSent = { x: -1, y: -1, z: -1 };
+        let smoothed = new THREE.Vector3(0.5, 0.5, 0.5);
+        let leds = { in: null, out: null };
+
+        // --- UI Refs ---
+        const ui = {
+            overlay: document.getElementById('overlay'),
+            status: document.getElementById('status'),
+            selOut: document.getElementById('midi-out-select'),
+            selIn: document.getElementById('midi-in-select'),
+            btn: document.getElementById('start-btn'),
+            ledIn: document.getElementById('led-in'),
+            ledOut: document.getElementById('led-out'),
+            axes: {
+                x: { type: document.getElementById('type-x'), val: document.getElementById('val-x') },
+                y: { type: document.getElementById('type-y'), val: document.getElementById('val-y') },
+                z: { type: document.getElementById('type-z'), val: document.getElementById('val-z') }
+            },
+            channel: document.getElementById('midi-channel'),
+            presets: document.querySelectorAll('.preset-btn')
+        };
+
+        // --- Init ---
+        init();
+
+        function init() {
+            // UI Logic
+            ['x', 'y', 'z'].forEach(axis => {
+                ui.axes[axis].type.addEventListener('change', (e) => {
+                    const isCC = e.target.value === 'cc';
+                    ui.axes[axis].val.disabled = !isCC;
+                    ui.axes[axis].val.style.opacity = isCC ? '1' : '0.3';
+                });
+            });
+
+            // MIDI Init
+            if (navigator.requestMIDIAccess) {
+                navigator.requestMIDIAccess({ sysex: false }).then(onMidiSuccess, onMidiFail);
+            } else {
+                ui.status.innerText = "Browser does not support Web MIDI.";
+            }
+
+            // Global preset function
+            window.applyPreset = applyPreset;
+
+            setupThree();
+        }
+
+        function applyPreset(name) {
+            ui.presets.forEach(b => b.classList.remove('active'));
+            if (name === 'roli_macro') {
+                // ROLI Equator Macros (Non-Conflicting)
+                ui.presets[0].classList.add('active');
+                setAxis('x', 'cc', 113); // Macro X (XY Pad X)
+                setAxis('y', 'cc', 114); // Macro Y (XY Pad Y)
+                setAxis('z', 'cc', 107); // Macro 1 (Fader 1)
+            } else {
+                // Standard Global CCs
+                ui.presets[1].classList.add('active');
+                setAxis('x', 'cc', 1);   // Mod Wheel
+                setAxis('y', 'cc', 74);  // Filter Cutoff
+                setAxis('z', 'cc', 7);   // Volume
+            }
+        }
+
+        function setAxis(axis, type, val) {
+            ui.axes[axis].type.value = type;
+            ui.axes[axis].val.value = val;
+            const event = new Event('change');
+            ui.axes[axis].type.dispatchEvent(event);
+        }
+
+        // --- MIDI Logic ---
+
+        function onMidiSuccess(access) {
+            midi.access = access;
+            midi.access.onstatechange = refreshMidi;
+            refreshMidi();
+            ui.btn.disabled = false;
+            ui.status.innerText = "System Ready. Please pair ROLI via Bluetooth if not wired.";
+        }
+
+        function onMidiFail(err) {
+            ui.status.innerText = "MIDI Error: " + err;
+        }
+
+        function refreshMidi() {
+            // Outputs
+            const oldOut = midi.out ? midi.out.id : null;
+            ui.selOut.innerHTML = "";
+            const outputs = Array.from(midi.access.outputs.values());
+            
+            if (outputs.length === 0) ui.selOut.add(new Option("No Outputs", ""));
+            else outputs.forEach(o => {
+                const opt = new Option(o.name, o.id);
+                ui.selOut.add(opt);
+                if (o.id === oldOut) opt.selected = true;
+            });
+            
+            if (!midi.out && outputs.length > 0) midi.out = outputs[0];
+            ui.selOut.onchange = (e) => midi.out = midi.access.outputs.get(e.target.value);
+
+            // Inputs (Just for visualizer)
+            const oldIn = midi.in ? midi.in.id : null;
+            ui.selIn.innerHTML = "";
+            ui.selIn.add(new Option("No Visuals", ""));
+            
+            Array.from(midi.access.inputs.values()).forEach(i => {
+                const opt = new Option(i.name, i.id);
+                ui.selIn.add(opt);
+                if (i.id === oldIn) opt.selected = true;
+            });
+
+            ui.selIn.onchange = (e) => {
+                if (midi.in) midi.in.onmidimessage = null;
+                if (e.target.value) {
+                    midi.in = midi.access.inputs.get(e.target.value);
+                    midi.in.onmidimessage = onMidiIn;
+                } else midi.in = null;
+            };
+        }
+
+        function flash(el, type) {
+            el.classList.add(type === 'rx' ? 'rx' : 'on');
+            if (leds[type]) clearTimeout(leds[type]);
+            leds[type] = setTimeout(() => el.classList.remove('rx', 'on'), 100);
+        }
+
+        function onMidiIn(e) {
+            flash(ui.ledIn, 'rx');
+            // Visualization logic: Note On (144/0x90)
+            const cmd = e.data[0] & 0xF0;
+            if (cmd === 0x90 && e.data[2] > 0) {
+                // Spawn a visual ghost key press
+                spawnGhostNote(e.data[1]);
+            }
+        }
+
+        function sendControl(axis, val01) {
+            if (!midi.out) return;
+            const type = ui.axes[axis].type.value;
+            const ch = Math.max(0, Math.min(15, parseInt(ui.channel.value) - 1));
+            
+            // Map 0-1 to MIDI
+            let msg = [];
+
+            if (type === 'cc') {
+                const num = parseInt(ui.axes[axis].val.value);
+                const v = Math.floor(val01 * 127);
+                if (v === lastSent[axis]) return;
+                lastSent[axis] = v;
+                msg = [0xB0 + ch, num, v];
+            } 
+            else if (type === 'pb') {
+                const v = Math.floor(val01 * 16383);
+                if (Math.abs(v - lastSent[axis]) < 16) return; // filtering
+                lastSent[axis] = v;
+                msg = [0xE0 + ch, v & 0x7F, (v >> 7) & 0x7F];
+            }
+            else if (type === 'at') {
+                const v = Math.floor(val01 * 127);
+                if (v === lastSent[axis]) return;
+                lastSent[axis] = v;
+                msg = [0xD0 + ch, v];
+            }
+
+            if (msg.length) {
+                midi.out.send(msg);
+                flash(ui.ledOut, 'on');
+            }
+        }
+
+        // --- Three.js XR ---
+
+        function setupThree() {
+            const container = document.createElement('div');
+            document.body.appendChild(container);
+
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 10);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            const arBtn = ARButton.createButton(renderer, { 
+                requiredFeatures: ['hand-tracking'], 
+                optionalFeatures: ['dom-overlay'],
+                domOverlay: { root: document.body }
+            });
+            arBtn.addEventListener('click', () => ui.overlay.classList.add('hidden'));
+            document.body.appendChild(arBtn);
+
+            // Lights
+            scene.add(new THREE.HemisphereLight(0x606060, 0x404040));
+            const dl = new THREE.DirectionalLight(0xffffff);
+            dl.position.set(1, 1, 1);
+            scene.add(dl);
+
+            // Hands
+            const handFactory = new XRHandModelFactory();
+            [0,1].forEach(i => {
+                const c = renderer.xr.getController(i);
+                c.addEventListener('selectstart', onGrabStart);
+                c.addEventListener('selectend', onGrabEnd);
+                scene.add(c);
+                
+                const h = renderer.xr.getHand(i);
+                h.add(handFactory.createHandModel(h));
+                scene.add(h);
+                if(i===0) hand1 = h; else hand2 = h;
+            });
+
+            createSceneObjects();
+            renderer.setAnimationLoop(loop);
+            
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth/window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function createSceneObjects() {
+            // Main Cube
+            const geo = new THREE.BoxGeometry(CONFIG.boxSize, CONFIG.boxSize, CONFIG.boxSize);
+            const mat = new THREE.LineBasicMaterial({ color: 0x00d2ff });
+            controlBox = new THREE.LineSegments(new THREE.EdgesGeometry(geo), mat);
+            controlBox.position.set(0, 1.3, -0.4);
+            scene.add(controlBox);
+
+            // Inner visual
+            controlBox.add(new THREE.AxesHelper(0.1));
+            
+            // Cursor
+            handIndicator = new THREE.Mesh(
+                new THREE.SphereGeometry(0.02, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0xffff00 })
+            );
+            controlBox.add(handIndicator);
+        }
+
+        // --- Interaction ---
+
+        function onGrabStart(e) {
+            const p = new THREE.Vector3();
+            controlBox.getWorldPosition(p);
+            if (e.target.position.distanceTo(p) < CONFIG.boxSize) {
+                isGrabbing = true;
+                controlBox.parent = e.target;
+                controlBox.position.set(0,0,0);
+            }
+        }
+
+        function onGrabEnd() {
+            if (isGrabbing) {
+                isGrabbing = false;
+                const p = new THREE.Vector3();
+                const q = new THREE.Quaternion();
+                controlBox.getWorldPosition(p);
+                controlBox.getWorldQuaternion(q);
+                scene.add(controlBox);
+                controlBox.position.copy(p);
+                controlBox.rotation.set(0,0,0); // Re-align
+            }
+        }
+
+        function spawnGhostNote(note) {
+            // Visual flair: spawn a cube when note is played on ROLI
+            // Note 60 = Middle C. Map roughly to space.
+            const x = ((note - 60) / 24) * 0.2; 
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.02, 0.02, 0.02),
+                new THREE.MeshBasicMaterial({ color: 0xff00ff })
+            );
+            mesh.position.set(x, -CONFIG.boxSize/2, 0);
+            controlBox.add(mesh);
+            ghostHands.push({ mesh, life: 1.0 });
+        }
+
+        function loop() {
+            // 1. Handle Ghosts
+            for (let i = ghostHands.length - 1; i >= 0; i--) {
+                const g = ghostHands[i];
+                g.life -= 0.02;
+                g.mesh.position.y += 0.002; // float up
+                g.mesh.material.opacity = g.life;
+                g.mesh.material.transparent = true;
+                if (g.life <= 0) {
+                    controlBox.remove(g.mesh);
+                    ghostHands.splice(i, 1);
+                }
+            }
+
+            // 2. Track Hand
+            let h = (hand2 && hand2.visible) ? hand2 : (hand1 && hand1.visible ? hand1 : null);
+            if (h && h.joints['index-finger-tip']) {
+                const j = h.joints['index-finger-tip'];
+                const wp = new THREE.Vector3();
+                j.getWorldPosition(wp);
+                
+                const lp = controlBox.worldToLocal(wp);
+                const sz = CONFIG.boxSize;
+                
+                // Norm 0..1
+                let x = (lp.x + sz/2) / sz;
+                let y = (lp.y + sz/2) / sz;
+                let z = (lp.z + sz/2) / sz;
+
+                x = THREE.MathUtils.clamp(x, 0, 1);
+                y = THREE.MathUtils.clamp(y, 0, 1);
+                z = THREE.MathUtils.clamp(z, 0, 1);
+
+                // Smooth
+                smoothed.lerp(new THREE.Vector3(x, y, z), CONFIG.smooth);
+
+                // Update Cursor
+                handIndicator.position.set(
+                    (smoothed.x * sz) - sz/2,
+                    (smoothed.y * sz) - sz/2,
+                    (smoothed.z * sz) - sz/2
+                );
+
+                // MIDI
+                const active = (x>0 && x<1 && y>0 && y<1 && z>0 && z<1);
+                handIndicator.material.color.setHex(active ? 0x00ff00 : 0xffff00);
+                
+                if (active) {
+                    sendControl('x', smoothed.x);
+                    sendControl('y', smoothed.y);
+                    sendControl('z', smoothed.z);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
